@@ -2,6 +2,8 @@
 
 **Hackathon:** AI for Lawyers (HackIndia, Nov 2 – Dec 1, 2026) · **Built by:** Likhith Podugu
 
+**▶ Try it live:** https://mini-courtroom-ai-agents.onrender.com — paste a case, click "Start the hearing". (Free tier: first load after idle can take ~50s.)
+
 Paste **one problem statement**. All three AI agents receive the **same**
 statement — no agent gets extra facts. The Offense (Prosecution) lawyer
 and the Defense lawyer debate it **until the Judge says it has heard
@@ -133,7 +135,7 @@ curl -X POST localhost:5000/api/hearing -H 'Content-Type: application/json' \
 ## Tests
 
 ```bash
-python test_courtroom.py        # 9 tests, no dependencies, no network
+python test_courtroom.py        # 10 tests, no dependencies, no network
 # or: python -m pytest test_courtroom.py -v
 ```
 
