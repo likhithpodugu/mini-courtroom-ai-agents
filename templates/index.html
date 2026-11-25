@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Courtroom — AI Agents Debate, Judge Decides</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f6f7f9; color: #1a1d21; margin: 0; padding: 0 16px 48px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { padding: 28px 0 8px; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  p.sub { color: #5b6470; margin: 0 0 18px; line-height: 1.5; }
+  .agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  .agent { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 14px; }
+  .agent b { display: block; font-size: 15px; }
+  .agent span { color: #5b6470; font-size: 13px; line-height: 1.45; display: block; margin-top: 4px; }
+  .dot-p { color: #c2410c; } .dot-d { color: #1d4ed8; } .dot-j { color: #111827; }
+  textarea { width: 100%; min-height: 130px; padding: 12px; font: inherit; font-size: 15px; line-height: 1.5; border: 1px solid #cbd2d9; border-radius: 10px; background: #fff; resize: vertical; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+  button { font: inherit; font-size: 15px; padding: 10px 18px; border-radius: 9px; border: 1px solid #d0d5db; background: #fff; cursor: pointer; }
+  button.primary { background: #111827; color: #fff; border-color: #111827; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .samples { color: #5b6470; font-size: 13px; }
+  .samples button { font-size: 13px; padding: 6px 10px; }
+  #status { color: #5b6470; margin: 8px 0; }
+  .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .speech { border-left: 4px solid #ccc; padding: 2px 0 2px 14px; margin: 14px 0; }
+  .speech.pros { border-color: #ea580c; } .speech.def { border-color: #2563eb; } .speech.judge { border-color: #111827; }
+  .speech h3 { margin: 0 0 6px; font-size: 14px; }
+  .speech h3 small { color: #5b6470; font-weight: normal; }
+  .speech p { margin: 0; line-height: 1.6; white-space: pre-wrap; }
+  .verdict { background: #111827; color: #fff; border-radius: 12px; padding: 18px; margin: 16px 0; }
+  .verdict h2 { margin: 0 0 8px; font-size: 20px; }
+  .verdict p { margin: 6px 0; line-height: 1.55; color: #e5e7eb; }
+  .verdict ul { margin: 8px 0; padding-left: 20px; color: #e5e7eb; line-height: 1.55; }
+  .scores { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0; }
+  .scores div { background: rgba(255,255,255,.08); border-radius: 8px; padding: 8px 12px; }
+  .meta { font-size: 13px; color: #5b6470; }
+  .hidden { display: none; }
+  footer { color: #8a929c; font-size: 13px; margin-top: 24px; line-height: 1.5; }
+  @media (max-width: 640px) { .agents { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚖️ Mini Courtroom</h1>
+    <p class="sub">Paste one problem statement. All three AI agents get the <b>same</b> statement —
+    the Prosecution and Defense lawyers debate it for 3 rounds, then the Judge gives the final verdict.</p>
+    <div class="agents">
+      <div class="agent"><b><span class="dot-p">●</span> Offense Lawyer</b><span>Prosecution — argues the claim, cites the documents and the amount.</span></div>
+      <div class="agent"><b><span class="dot-d">●</span> Defense Lawyer</b><span>Argues the other side — burden of proof, gaps in evidence, fair chance.</span></div>
+      <div class="agent"><b><span class="dot-j">●</span> Judge</b><span>Scores both sides on evidence, reasoning &amp; consistency, then decides.</span></div>
+    </div>
+  </header>
+
+  <label for="case"><b>Problem statement / case facts</b></label>
+  <textarea id="case" placeholder="Example: Priya paid a ₹50,000 deposit to her landlord under a rental agreement signed on 12 March 2025. She vacated on 1 Oct 2025 in good condition, but the landlord refused to refund it, claiming ₹20,000 for repairs with no bills..."></textarea>
+
+  <div class="row samples">Try a sample:
+    {% for s in samples %}<button type="button" data-case="{{ s.case | e }}">{{ s.title }}</button>{% endfor %}
+  </div>
+  <div class="row">
+    <button class="primary" id="run" type="button">▶ Start the hearing</button>
+    <button id="download" type="button" class="hidden">⬇ Download transcript</button>
+  </div>
+  <div id="status"></div>
+  <div id="out"></div>
+
+  <footer>Simulation for legal education and hackathon demo only — not legal advice, and not a real court judgment.
+  Works offline with no API keys. Optional: set <code>OPENAI_API_KEY</code> to enrich speeches with a real LLM.</footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let lastResult = null;
+document.querySelectorAll('[data-case]').forEach(b => b.onclick = () => { $('case').value = b.dataset.case; $('case').focus(); });
+$('run').onclick = async () => {
+  const text = $('case').value.trim();
+  if (text.length < 20) { $('status').textContent = 'Please describe the case in a sentence or two first.'; return; }
+  $('run').disabled = true; $('status').textContent = 'Court is in session — opening statements, rebuttals, closing arguments…';
+  $('out').innerHTML = '';
+  try {
+    const r = await fetch('/api/hearing', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ case: text }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Hearing failed');
+    lastResult = data; render(data); $('status').textContent = '';
+    $('download').classList.remove('hidden');
+  } catch (e) { $('status').textContent = 'Error: ' + e.message; }
+  $('run').disabled = false;
+};
+$('download').onclick = () => {
+  if (!lastResult) return;
+  const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mini-courtroom-transcript.json'; a.click();
+};
+function render(d) {
+  const cls = s => s === 'Prosecution' ? 'pros' : s === 'Defense' ? 'def' : 'judge';
+  const v = d.verdict, s = d.case_summary;
+  let h = `<div class="card"><div class="meta">Shared case file — all 3 agents received this exact statement</div>
+    <p><b>Issue:</b> ${s.issue} &nbsp;|&nbsp; <b>${s.plaintiff}</b> vs <b>${s.defendant}</b>
+    ${s.amounts.length ? ` &nbsp;|&nbsp; <b>Amount:</b> ${s.amounts.join(', ')}` : ''}
+    ${s.documents.length ? ` &nbsp;|&nbsp; <b>Documents:</b> ${s.documents.join(', ')}` : ''}</p></div>`;
+  h += '<h2>Debate transcript</h2>';
+  d.transcript.forEach(t => { h += `<div class="speech ${cls(t.speaker)}"><h3>${t.speaker} — ${t.role} <small>· Round ${t.round_no}: ${t.round_name}</small></h3><p>${t.text}</p></div>`; });
+  h += `<div class="verdict"><h2>⚖ Verdict: ${v.verdict}</h2>
+    <div class="scores"><div>Prosecution <b>${v.prosecution_avg}/10</b></div><div>Defense <b>${v.defense_avg}/10</b></div><div>Confidence <b>${v.confidence_pct}%</b></div></div>
+    <p><b>Why:</b></p><ul>${v.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+    <p><b>Order:</b> ${v.order}</p></div>`;
+  $('out').innerHTML = h;
+  $('out').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
