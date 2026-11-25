@@ -2,14 +2,19 @@
 Real LLM layer for the Mini Courtroom.
 
 Provider priority (first one that works wins):
-  1. OpenAI — the provider Likhith chose on Oct 22, 2026. Set
+  1. Groq — set GROQ_API_KEY (and optionally GROQ_MODEL, default
+     llama-3.3-70b-versatile). Groq is OpenAI-compatible and very fast,
+     which is what a live courtroom debate needs. Added Nov 25, 2026.
+  2. OpenAI — the provider Likhith chose on Oct 22, 2026. Set
      OPENAI_API_KEY (and optionally OPENAI_MODEL, OPENAI_BASE_URL for any
-     OpenAI-compatible endpoint, e.g. Groq / OpenRouter). Keys live in
+     OpenAI-compatible endpoint, e.g. OpenRouter). Keys live in
      env vars only — never in the repo, never in chat. The OpenAI key he
      pasted in chat on Oct 22 was treated as exposed and is NOT used.
-  2. Pollinations — free public text API, no key needed, so the
+     A Groq key pasted in chat on Nov 25 was likewise treated as exposed
+     and is NOT used — only a fresh key entered via secure entry is.
+  3. Pollinations — free public text API, no key needed, so the
      hackathon demo works out of the box. Used only when no key is set.
-  3. None — every caller falls back to the local argument engine in
+  4. None — every caller falls back to the local argument engine in
      courtroom.py, so a hearing always runs, online or offline.
 
 `chat()` returns None (never raises) when the provider is unreachable,
@@ -95,7 +100,16 @@ class LLMClient:
 
 
 def get_client() -> LLMClient:
-    """OpenAI when a key is set, otherwise the free no-key provider."""
+    """Groq when GROQ_API_KEY is set, else OpenAI when OPENAI_API_KEY is
+    set, otherwise the free no-key provider."""
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if groq_key:
+        return LLMClient(
+            provider="groq",
+            model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            api_key=groq_key,
+            base_url=os.environ.get("GROQ_BASE_URL",
+                                    "https://api.groq.com/openai/v1"))
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:
         return LLMClient(
