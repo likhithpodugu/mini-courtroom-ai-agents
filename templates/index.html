@@ -47,7 +47,8 @@
   <header>
     <h1>⚖️ Mini Courtroom</h1>
     <p class="sub">Paste one problem statement. All three AI agents get the <b>same</b> statement —
-    the Prosecution and Defense lawyers debate it for 3 rounds, then the Judge gives the final verdict.</p>
+    the Prosecution and Defense lawyers debate it until the Judge says it has heard enough, then the Judge gives the final verdict.
+    <span class="meta">LLM: {{ llm_provider }} — set <code>OPENAI_API_KEY</code> to use OpenAI instead.</span></p>
     <div class="agents">
       <div class="agent"><b><span class="dot-p">●</span> Offense Lawyer</b><span>Prosecution — argues the claim, cites the documents and the amount.</span></div>
       <div class="agent"><b><span class="dot-d">●</span> Defense Lawyer</b><span>Argues the other side — burden of proof, gaps in evidence, fair chance.</span></div>
@@ -101,8 +102,10 @@ function render(d) {
     <p><b>Issue:</b> ${s.issue} &nbsp;|&nbsp; <b>${s.plaintiff}</b> vs <b>${s.defendant}</b>
     ${s.amounts.length ? ` &nbsp;|&nbsp; <b>Amount:</b> ${s.amounts.join(', ')}` : ''}
     ${s.documents.length ? ` &nbsp;|&nbsp; <b>Documents:</b> ${s.documents.join(', ')}` : ''}</p></div>`;
+  const lastCheck = d.judge_checks[d.judge_checks.length - 1];
+  h += `<div class="card"><b>⚖ The Judge stopped the debate after round ${d.rounds_held}</b> — ${lastCheck ? lastCheck.reason : ''}<br><span class="meta">LLM: ${d.llm_provider} · Debate ran ${d.rounds_held} round(s) (min 2, max 6) · ${d.judge_checks.length} judge check(s)</span></div>`;
   h += '<h2>Debate transcript</h2>';
-  d.transcript.forEach(t => { h += `<div class="speech ${cls(t.speaker)}"><h3>${t.speaker} — ${t.role} <small>· Round ${t.round_no}: ${t.round_name}</small></h3><p>${t.text}</p></div>`; });
+  d.transcript.forEach(t => { h += `<div class="speech ${cls(t.speaker)}"><h3>${t.speaker} — ${t.role} <small>· Round ${t.round_no}: ${t.round_name} · ${t.source === 'local' ? 'local engine' : 'via LLM (' + t.source + ')'}</small></h3><p>${t.text}</p></div>`; });
   h += `<div class="verdict"><h2>⚖ Verdict: ${v.verdict}</h2>
     <div class="scores"><div>Prosecution <b>${v.prosecution_avg}/10</b></div><div>Defense <b>${v.defense_avg}/10</b></div><div>Confidence <b>${v.confidence_pct}%</b></div></div>
     <p><b>Why:</b></p><ul>${v.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
