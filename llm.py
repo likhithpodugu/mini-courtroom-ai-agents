@@ -3,8 +3,13 @@ Real LLM layer for the Mini Courtroom.
 
 Provider priority (first one that works wins):
   1. Groq — set GROQ_API_KEY (and optionally GROQ_MODEL, default
-     llama-3.3-70b-versatile). Groq is OpenAI-compatible and very fast,
-     which is what a live courtroom debate needs. Added Nov 25, 2026.
+     openai/gpt-oss-120b, the strongest chat model on Groq as verified
+     Nov 25, 2026 — llama-3.3-70b-versatile has been retired by Groq).
+     Groq is OpenAI-compatible and very fast, which is what a live
+     courtroom debate needs. Added Nov 25, 2026. Groq sits behind
+     Cloudflare, which blocks the default Python user agent, so all
+     calls here send a browser user agent (verified Nov 25: without it
+     Groq answers 403 error 1010).
   2. OpenAI — the provider Likhith chose on Oct 22, 2026. Set
      OPENAI_API_KEY (and optionally OPENAI_MODEL, OPENAI_BASE_URL for any
      OpenAI-compatible endpoint, e.g. OpenRouter). Keys live in
@@ -54,7 +59,13 @@ class LLMClient:
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions", data=payload,
             headers={"Authorization": f"Bearer {self.api_key}",
-                     "Content-Type": "application/json"}, method="POST")
+                     "Content-Type": "application/json",
+                     # Groq's Cloudflare shield blocks Python's default
+                     # user agent (403 error 1010); a browser agent passes.
+                     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/120.0 Safari/537.36"},
+            method="POST")
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 out = json.loads(resp.read())
@@ -106,7 +117,7 @@ def get_client() -> LLMClient:
     if groq_key:
         return LLMClient(
             provider="groq",
-            model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
             api_key=groq_key,
             base_url=os.environ.get("GROQ_BASE_URL",
                                     "https://api.groq.com/openai/v1"))
