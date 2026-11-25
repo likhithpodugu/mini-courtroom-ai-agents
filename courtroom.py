@@ -178,6 +178,7 @@ class Speech:
     speaker: str          # "Prosecution" | "Defense" | "Judge"
     role: str
     text: str
+    source: str = "local"  # "local" | "llm:<provider>"
 
 
 class BaseLawyer:
@@ -423,8 +424,126 @@ def judge_deliberation(case: ParsedCase, speeches: list[Speech]) -> dict:
 
 # ---------------------------------------------------------------- hearing
 
-def run_hearing(statement: str) -> dict:
-    """Run one full hearing. One statement in, transcript + verdict out."""
+MIN_ROUNDS = 2   # both sides must be heard at least this many rounds
+MAX_ROUNDS = 6   # hard cap — the Judge must decide by here
+
+
+def _llm_speech(llm, system: str, user: str, fallback: str,
+                forbidden: list | None = None) -> tuple[str, str]:
+    """One speech from the LLM when available, else the local engine.
+    Returns (text, source). Never raises — a failed LLM call just means
+    the local engine speaks instead. `forbidden` guards against the
+    classic weak-model failure: the LLM siding with the wrong party
+    (e.g. the Defense claiming to represent the claimant). A speech
+    containing a forbidden phrase is discarded for the local one."""
+    if llm is None:
+        return fallback, "local"
+    try:
+        out = llm.chat(system, user)
+    except Exception:
+        out = None
+    if out:
+        low = out.lower()
+        if forbidden and any(f.lower() in low for f in forbidden):
+            return fallback, "local"
+        return out, f"llm:{llm.provider}"
+    return fallback, "local"
+
+
+def _first_name(party: str) -> str:
+    """First name of a person party, or '' for generic parties
+    ('the Claimant', 'the State', ...)."""
+    if party.lower().startswith("the "):
+        return ""
+    return party.split()[0]
+
+
+def judge_check(case: ParsedCase, speeches: list[Speech],
+                llm=None, min_rounds: int = MIN_ROUNDS,
+                max_rounds: int = MAX_ROUNDS) -> dict:
+    """After each debate round the Judge decides: enough, or one more round?
+
+    Deterministic rule (always applies): not enough before MIN_ROUNDS;
+    enough when one side leads the rubric by >= 1.0; enough at 4+ rounds
+    when both sides have been fully heard and are only repeating
+    themselves; never past MAX_ROUNDS. When an LLM is available the
+    Judge also asks it — the LLM can keep a close debate going, but it
+    can never override the caps.
+    """
+    rounds_held = max((s.round_no for s in speeches), default=0)
+    scores = _score(case, speeches)
+    p_avg = sum(scores["prosecution"].values()) / 3
+    d_avg = sum(scores["defense"].values()) / 3
+    margin = round(p_avg - d_avg, 1)
+
+    if rounds_held >= max_rounds:
+        return {"after_round": rounds_held, "sufficient": True,
+                "reason": f"Maximum of {max_rounds} debate rounds reached — "
+                          "the Court must decide now.",
+                "scores": scores, "margin": margin, "decided_by": "cap"}
+    if rounds_held < min_rounds:
+        return {"after_round": rounds_held, "sufficient": False,
+                "reason": "Both sides have not yet been fully heard.",
+                "scores": scores, "margin": margin, "decided_by": "rule"}
+    if abs(margin) >= 1.0:
+        decision, reason = True, (
+            f"One side leads the rubric by {abs(margin)} points "
+            f"({max(p_avg, d_avg):.1f} vs {min(p_avg, d_avg):.1f}) — the "
+            "case is clear enough to decide.")
+    elif rounds_held >= 4:
+        decision, reason = True, (
+            f"Both sides have argued for {rounds_held} rounds and the scores "
+            "are still close — further argument would only repeat the same "
+            "points.")
+    else:
+        decision, reason = False, (
+            f"Scores are close ({p_avg:.1f} vs {d_avg:.1f}) and the key "
+            "facts are still disputed — the Court needs another round.")
+
+    # The LLM Judge gets a say too: it can keep a close debate going.
+    if decision and llm is not None and rounds_held < max_rounds:
+        try:
+            transcript = "\n".join(
+                f"{s.speaker}: {s.text}" for s in speeches)
+            verdict = llm.chat(
+                "You are the Judge in a mini courtroom. You have heard the "
+                "debate below. Decide ONLY whether you have heard enough to "
+                "give a verdict, or need one more round of debate.",
+                f"Case: {case.raw}\n\nDebate so far:\n{transcript}\n\n"
+                "Reply with exactly one line, either "
+                "'SUFFICIENT: <one-line reason>' or "
+                "'CONTINUE: <one-line reason>'.",
+                max_tokens=120)
+        except Exception:
+            verdict = None
+        if verdict and verdict.strip().upper().startswith("CONTINUE"):
+            return {"after_round": rounds_held, "sufficient": False,
+                    "reason": verdict.strip()[len("CONTINUE:"):].strip()
+                    or "The Judge wants one more round.",
+                    "scores": scores, "margin": margin,
+                    "decided_by": "llm-judge"}
+    return {"after_round": rounds_held, "sufficient": decision,
+            "reason": reason, "scores": scores, "margin": margin,
+            "decided_by": "rule"}
+
+
+def run_hearing(statement: str, llm=None,
+                max_rounds: int = MAX_ROUNDS,
+                min_rounds: int = MIN_ROUNDS) -> dict:
+    """Run one full hearing. One statement in, transcript + verdict out.
+
+    The debate is NOT fixed-length: after every rebuttal round the Judge
+    checks whether it has heard enough (see judge_check). It stops early
+    on a clear case and runs longer on a close one, up to max_rounds.
+    Pass an LLM client (llm.get_client()) for LLM-generated speeches,
+    or None for the offline local engine.
+    """
+    return _run_hearing(statement, llm, min_rounds, max_rounds)
+
+
+def _run_hearing(statement: str, llm=None,
+                 min_rounds: int = MIN_ROUNDS,
+                 max_rounds: int = MAX_ROUNDS) -> dict:
     if not statement or not statement.strip():
         raise ValueError("Please provide a problem statement / case facts.")
     case = parse_case(statement)
@@ -433,27 +552,125 @@ def run_hearing(statement: str) -> dict:
     defense = DefenseLawyer(case)
 
     speeches: list[Speech] = []
-    p_open = prosecution.opening()
-    d_open = defense.opening()
-    speeches.append(Speech(1, "Opening Statements", "Prosecution",
-                           prosecution.role, p_open))
-    speeches.append(Speech(1, "Opening Statements", "Defense",
-                           defense.role, d_open))
-    speeches.append(Speech(2, "Rebuttals", "Prosecution",
-                           prosecution.role, prosecution.rebuttal(d_open)))
-    speeches.append(Speech(2, "Rebuttals", "Defense",
-                           defense.role, defense.rebuttal(p_open)))
-    speeches.append(Speech(3, "Closing Arguments", "Prosecution",
-                           prosecution.role, prosecution.closing()))
-    speeches.append(Speech(3, "Closing Arguments", "Defense",
-                           defense.role, defense.closing()))
+
+    def add(round_no, name, speaker, role, text, source):
+        speeches.append(Speech(round_no, name, speaker, role, text, source))
+
+    # Round 1 — Opening Statements (both sides). Party names are stated
+    # explicitly: the LLM must never swap sides (it did once in testing).
+    no_invent = ("Use ONLY the facts in the case below. Never invent "
+                 "facts, amounts, dates, documents, or clauses from an "
+                 "agreement. If a fact is not in the case, say so. "
+                 "120-180 words.")
+    p_first, d_first = _first_name(case.plaintiff), _first_name(case.defendant)
+    # Side-swap guard: reject any LLM speech that claims the other side.
+    no_p = [f"represent {p_first}", f"represent ms. {p_first}",
+            f"represent mr. {p_first}"] if p_first else []
+    no_d = [f"represent {d_first}", f"represent ms. {d_first}",
+            f"represent mr. {d_first}"] if d_first else []
+    text, src = _llm_speech(
+        llm,
+        "You are the Prosecution (offense) lawyer in a mini courtroom. "
+        f"Your client is {case.plaintiff}. The other side is "
+        f"{case.defendant}. Argue for your client. {no_invent}",
+        f"Case: {case.raw}\n\nGive your opening statement. Begin with the "
+        f"sentence 'I represent {case.plaintiff}.'",
+        prosecution.opening(), forbidden=no_d)
+    add(1, "Opening Statements", "Prosecution", prosecution.role, text, src)
+    p_open = text
+    text, src = _llm_speech(
+        llm,
+        "You are the Defense lawyer in a mini courtroom. "
+        f"Your client is {case.defendant}. The other side is "
+        f"{case.plaintiff}. Argue for your client. {no_invent}",
+        f"Case: {case.raw}\n\nGive your opening statement. Begin with the "
+        f"sentence 'I represent {case.defendant}.'",
+        defense.opening(), forbidden=no_p)
+    add(1, "Opening Statements", "Defense", defense.role, text, src)
+    d_open = text
+
+    # Rounds 2..MAX — Rebuttals, until the Judge says enough.
+    judge_checks: list[dict] = []
+    stopped_by = "judge"
+    round_no = 2
+    while True:
+        text, src = _llm_speech(
+            llm,
+            "You are the Prosecution (offense) lawyer in a mini courtroom. "
+            f"Your client is {case.plaintiff}. Rebut the Defense lawyer's "
+            "last speech point by point. " + no_invent,
+            f"Case: {case.raw}\n\nDefense just said:\n{d_open}\n\n"
+            f"Remember: your client is {case.plaintiff}, not "
+            f"{case.defendant}. Give your rebuttal.",
+            prosecution.rebuttal(d_open), forbidden=no_d)
+        add(round_no, "Rebuttals", "Prosecution", prosecution.role, text, src)
+        p_last = text
+        text, src = _llm_speech(
+            llm,
+            "You are the Defense lawyer in a mini courtroom. "
+            f"Your client is {case.defendant}. Rebut the Prosecution "
+            "lawyer's last speech point by point. " + no_invent,
+            f"Case: {case.raw}\n\nProsecution just said:\n{p_last}\n\n"
+            f"Remember: your client is {case.defendant}, not "
+            f"{case.plaintiff}. Give your rebuttal.",
+            defense.rebuttal(p_last), forbidden=no_p)
+        add(round_no, "Rebuttals", "Defense", defense.role, text, src)
+        d_open = text
+
+        check = judge_check(case, speeches, llm, min_rounds, max_rounds)
+        judge_checks.append(check)
+        if check["sufficient"]:
+            stopped_by = ("max_rounds" if check["decided_by"] == "cap"
+                          else "judge")
+            break
+        round_no += 1
+
+    rounds_held = round_no
+
+    # Closing Arguments (both sides), then the verdict.
+    closing_no = rounds_held + 1
+    text, src = _llm_speech(
+        llm,
+        "You are the Prosecution (offense) lawyer. "
+        f"Your client is {case.plaintiff}. Give your closing argument, "
+        "summarising why your client should win. " + no_invent.replace(
+            "120-180 words", "100-150 words"),
+        f"Case: {case.raw}\n\nRemember: your client is {case.plaintiff}. "
+        "Give your closing argument.",
+        prosecution.closing(), forbidden=no_d)
+    add(closing_no, "Closing Arguments", "Prosecution",
+        prosecution.role, text, src)
+    text, src = _llm_speech(
+        llm,
+        "You are the Defense lawyer. "
+        f"Your client is {case.defendant}. Give your closing argument, "
+        "summarising why the claim should fail. " + no_invent.replace(
+            "120-180 words", "100-150 words"),
+        f"Case: {case.raw}\n\nRemember: your client is {case.defendant}. "
+        "Give your closing argument.",
+        defense.closing(), forbidden=no_p)
+    add(closing_no, "Closing Arguments", "Defense", defense.role, text, src)
 
     verdict = judge_deliberation(case, speeches)
-    speeches.append(Speech(4, "Judgment", "Judge", "Judge",
-                           verdict["judge_statement"]))
+    drafted, judge_src = _llm_speech(
+        llm,
+        "You are the Judge. Draft the one-paragraph judgment from the "
+        "verdict below, in plain language. Do not change the verdict, "
+        "the scores or the order.",
+        f"Verdict: {verdict['verdict']}\nScores: Prosecution "
+        f"{verdict['prosecution_avg']}/10, Defense "
+        f"{verdict['defense_avg']}/10. Order: {verdict['order']}",
+        verdict["judge_statement"])
+    verdict = dict(verdict, judge_statement=drafted)
+    speeches.append(Speech(closing_no + 1, "Judgment", "Judge", "Judge",
+                           verdict["judge_statement"], judge_src))
 
     return {
         "shared_case_statement": case.raw,
+        "llm_provider": llm.provider if llm is not None else "local",
+        "rounds_held": rounds_held,
+        "stopped_by": stopped_by,
+        "judge_checks": judge_checks,
         "case_summary": {
             "issue": case.issue,
             "plaintiff": case.plaintiff,
