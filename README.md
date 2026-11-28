@@ -62,6 +62,16 @@ tied) runs to 4+ rounds. The debate never runs past 6 rounds.
   document merely being mentioned does not mean it supports a claim.
   Example: in the rent-deposit sample the ₹20,000 repair deduction
   is flagged **Unsupported — no bills or receipts supplied**.
+- **Optional evidence notes** — paste excerpts (one per line) in the
+  "Evidence / documents (optional)" field, e.g. "Clause 4, Rental
+  Agreement: deposit refundable on vacating in good condition". Each
+  line becomes a **Reported** matrix row with evidence
+  "User-supplied evidence note", is fed to both counsel and the
+  Judge, and is cited in the brief as user-supplied — reported as
+  stated, never treated as a verified document. Empty evidence
+  changes nothing. API: `POST /api/hearing {"case": "...",
+  "evidence": "..."}`; CLI: `--evidence "..."` or
+  `--evidence-file notes.txt`.
 - **Legal Research** (`legal_sources.py`) — keyword retrieval over a
   small curated set of **verified** Indian sources: Indian Contract
   Act 1872 ss. 73–74, Transfer of Property Act 1882 ss. 105, 108(m)
@@ -190,10 +200,40 @@ curl -X POST localhost:5000/api/hearing -H 'Content-Type: application/json' \
 
 `GET /api/legal-sources` → the full verified source set.
 
+`POST /api/hearing` also accepts an optional `"evidence"` string
+(pasted excerpts, one per line); each becomes a Reported matrix row
+attributed as a user-supplied note, and the response echoes them as
+`"evidence_notes"`.
+
+## Evaluation — 10 cases
+
+Hand-built cases, run against the offline local engine
+(`python3 eval_cases.py` — reproducible, no network, no keys).
+Each case states the expected evidence gap; the result is recorded
+honestly. Misses are known limitations of the pattern-based matrix,
+not hidden: the matrix only covers the fact patterns it knows, and
+it does not compare times, amounts or facts for contradictions.
+
+| Case | Expected evidence gap | System result | Actual result |
+|---|---|---|---|
+| Rental deposit dispute (sample) | ₹20,000 repair deduction flagged Unsupported — no bills | **Correct** | Repairs row Unsupported — 'No bills or receipts supplied'. |
+| Freelance contract, unpaid ₹80,000 (sample) | 'Delay' excuse flagged Unverified — not a defence unless the contract makes it one | **Correct** | Delay row Unverified — delay is not a defence unless the contract makes it one. |
+| Shoplifting allegation (sample) | CCTV footage + no witness flagged Unsupported | **Correct** | CCTV Unsupported (footage not shared); no-witness row present. |
+| Tenancy — no move-out inspection report | Missing move-out inspection report flagged as an evidence gap | **Missed** | No row mentions the inspection report — the matrix only covers the patterns it knows (deposit, agreement, repairs, refund). The assessment still comes back Mixed, but the specific gap is not named. |
+| Freelance — no proof of delivery | Missing delivery receipt / confirmation flagged as missing evidence | **Partial** | Delivery mentioned in the matrix, but not listed as missing evidence. |
+| Shoplifting — CCTV timestamp mismatch | 3:00 AM timestamp vs 10 PM closing flagged as a contradiction | **Missed** | CCTV is flagged Unsupported (footage not shared), but the 3:00 AM vs 10 PM closing contradiction is never detected — the system does not compare times or look for contradictions between facts. |
+| Tenancy — parties disagree on the deposit figure | Two different deposit figures (₹50,000 vs ₹30,000) flagged as a contradiction | **Missed** | Both amounts (₹50,000 and ₹30,000) are parsed, but the matrix uses only the first amount and never flags that the parties disagree on the deposit figure. |
+| Vague one-line case | System says nothing is established — every fact Unverified | **Correct** | Assessment is 'Not established on current evidence'; the matrix is all Unverified — the system honestly says nothing is proved. |
+| Shoplifting — witness never produced | Witness never produced flagged as an evidence gap | **Correct** | Weaknesses name the withheld evidence ('Evidence the statement itself says was withheld...'). No dedicated witness row, but the gap is surfaced. |
+| Tenancy — landlord HAS repair bills | ₹20,000 repair deduction NOT flagged Unsupported — bills were supplied | **Partial** | Status is right (not Unsupported — bills exist), but the row's evidence text wrongly says 'No cost evidence stated in the statement'. |
+
+Total: **5 Correct, 2 Partial, 3 Missed** out of 10 cases
+(local engine, no LLM).
+
 ## Tests
 
 ```bash
-python test_courtroom.py        # 18 tests, no dependencies, no network
+python test_courtroom.py        # 21 tests, no dependencies, no network
 # or: python -m pytest test_courtroom.py -v
 ```
 
@@ -203,8 +243,11 @@ shoplifting CCTV/witness Unsupported), legal-source retrieval
 returns only verified entries with links, assessment has no
 confidence percentage and no verdict key, the brief contains all
 required sections and no invented amounts, the frontend contains
-no `innerHTML` (all rendering via `textContent`), and a malicious
-case input (`<script>`, `<img onerror>`) is handled as data.
+no `innerHTML` (all rendering via `textContent`), a malicious
+case input (`<script>`, `<img onerror>`) is handled as data, and
+the optional evidence notes (appear in matrix/brief with correct
+attribution, empty evidence is a no-op, a malicious note is data
+not markup).
 
 ## Files
 
@@ -217,6 +260,8 @@ case input (`<script>`, `<img onerror>`) is handled as data.
 - `templates/index.html` — light-theme workspace UI, XSS-safe rendering
   (`textContent` only, no `innerHTML`)
 - `test_courtroom.py` — tests
+- `eval_cases.py` — the 10-case evaluation above (reproducible)
+- `demo-script.md` — 90-second demo script for the rent-deposit case
 
 ## Limitations
 
@@ -231,6 +276,12 @@ case input (`<script>`, `<img onerror>`) is handled as data.
 - The rubric scores measure argument quality against the evidence
   matrix. They are not calibrated against real cases and are not a
   probability of winning.
+- Known gaps (measured in Evaluation — 10 cases: 5 Correct, 2 Partial,
+  3 Missed): the matrix does not detect contradictions between facts
+  (a 3:00 AM CCTV timestamp vs a 10 PM closing, or two different
+  deposit figures), it does not name gaps outside the patterns it
+  knows (e.g. a missing move-out inspection report), and a repairs
+  row can say "No cost evidence stated" even when bills were supplied.
 - LLM speeches can still be imperfect; the local engine, the matrix
   and the "unsupported" labelling are the guardrails, not a guarantee.
 
