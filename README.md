@@ -1,28 +1,51 @@
-# ⚖️ Mini Courtroom — AI Agents Debate, Judge Decides
+# ⚖️ Mini Courtroom — Litigation-Prep Simulator
 
 **Hackathon:** AI for Lawyers (HackIndia, Nov 2 – Dec 1, 2026) · **Built by:** Likhith Podugu
 
-**▶ Try it live:** https://mini-courtroom-ai-agents.onrender.com — paste a case, click "Start the hearing". (Free tier: first load after idle can take ~50s.)
+**▶ Try it live:** https://mini-courtroom-ai-agents.onrender.com — paste a case, click "Analyse the case". (Free tier: first load after idle can take ~50s.)
 
-Paste **one problem statement**. All three AI agents receive the **same**
-statement — no agent gets extra facts. The Offense (Prosecution) lawyer
-and the Defense lawyer debate it **until the Judge says it has heard
-enough**, then the Judge scores both sides and delivers the final verdict.
+Paste **one problem statement** and get a litigation-preparation
+work product: an **evidence matrix**, **verified Indian legal
+sources**, both sides argued, a **Judge's critique** (not a verdict),
+and a **downloadable case brief** a lawyer can review.
+
+> **What this is NOT:** it does not decide cases, give verdicts,
+> predict court outcomes, or give legal advice. It stress-tests
+> arguments, exposes weaknesses and missing evidence, and produces
+> a cited brief. A qualified lawyer must review and verify
+> everything.
 
 ```
 You ── problem statement ──► ┌─────────────────────┐
-                              │  Shared case file   │  (same text to all 3)
+                              │  Shared case file   │  (same text to all)
                               └──────┬──────┬───────┘
-                                     ▼      ▼       ▼
-                              Prosecution  Defense  Judge (listens)
-                                     │      │
-                              Round 1: Opening Statements
-                              Rounds 2-6: Rebuttals ──► Judge checks after
-                                  │    each round: ENOUGH or CONTINUE?
-                                  ▼    (clear lead, or 4+ rounds, or cap)
-                              Closing Arguments
                                      ▼
-                              Judge: scores + verdict + order
+                          ┌──────────────────────┐
+                          │  Evidence Analyst    │  fact → evidence →
+                          │  Reported /          │  supports → status
+                          │  Unverified /        │
+                          │  Unsupported         │
+                          └──────────┬───────────┘
+                                     ▼
+                          ┌──────────────────────┐
+                          │  Legal Research      │  ONLY verified Indian
+                          │  (curated sources)   │  statutes & judgments
+                          └──────────┬───────────┘
+                                     ▼      ▼
+                          Claimant's Counsel  Respondent's Counsel
+                                     │      │
+                          Round 1: Opening Statements
+                          Rounds 2-6: Rebuttals ──► Judge checks after
+                              │    each round: ENOUGH to assess, or CONTINUE?
+                              ▼    (clear lead, or 4+ rounds, or cap)
+                          Closing Arguments
+                                     ▼
+                          Judge: critique — unsupported claims,
+                                 contradictions, evidence gaps,
+                                 preliminary assessment
+                                     ▼
+                          Case Brief (.md) — facts, evidence, law,
+                          weaknesses, missing evidence, next steps
 ```
 
 A clear case stops after round 2; a close one (thin evidence, scores
@@ -30,34 +53,57 @@ tied) runs to 4+ rounds. The debate never runs past 6 rounds.
 
 ## How it works
 
-- **Case parser** (`courtroom.py:parse_case`) — extracts the issue type
-  (tenancy / contract / criminal / employment / consumer / property /
-  accident), parties (`X vs Y`), amounts (₹), dates, and documents
-  (agreement, receipt, CCTV, witness…) from the statement.
-- **Prosecution Lawyer** — argues the claim, cites the documents and the
-  amount, answers the defence in rebuttal.
-- **Defense Lawyer** — burden of proof, gaps in the evidence, no fair
-  chance to cure, proportionate relief at most.
-- **Judge** — public rubric, computed from the case: evidence, reasoning,
-  consistency (each /10). Verdict follows the score margin: a clear lead
-  wins, a close debate is *partly allowed*, a thin criminal case is
-  *not proved beyond reasonable doubt*. The order (pay / dismiss / 50%)
-  follows the verdict. The Judge also controls the debate length: after
-  every rebuttal round it checks the scores and — when an LLM is on —
-  asks the LLM Judge whether one more round is needed. It stops early on
-  a clear case, lets a close one run, and caps at 6 rounds.
+- **Evidence Analyst** (`courtroom.py:build_evidence_matrix`) — runs
+  BEFORE the debate. Each fact/claim is tied to the evidence the
+  statement mentions for it and labelled **Reported** (supporting
+  material exists), **Unverified** (asserted, nothing stated) or
+  **Unsupported** (the statement itself says the material was never
+  produced — "no bills", "footage not shared", "no witness"). A
+  document merely being mentioned does not mean it supports a claim.
+  Example: in the rent-deposit sample the ₹20,000 repair deduction
+  is flagged **Unsupported — no bills or receipts supplied**.
+- **Legal Research** (`legal_sources.py`) — keyword retrieval over a
+  small curated set of **verified** Indian sources: Indian Contract
+  Act 1872 ss. 73–74, Transfer of Property Act 1882 ss. 105, 108(m)
+  and (q), and the Supreme Court decisions in *Fateh Chand*
+  (AIR 1963 SC 1405), *Kailash Nath Associates* ((2015) 4 SCC 136)
+  and *M.S. Nagabhushan* ((2025) INSC 316). Every entry was verified
+  by search before inclusion, with its source link. If no source
+  supports a claim, it is labelled **unsupported — no verified
+  source retrieved** instead of inventing a citation.
+- **Claimant's Counsel / Respondent's Counsel** — argue from the
+  evidence matrix and the retrieved sources only. Prompts forbid
+  inventing facts, amounts, statutes or case names, and forbid
+  citing anything but the retrieved sources.
+- **Judge — critique, not a verdict** (`courtroom.py:judge_assessment`)
+  — identifies unsupported claims, contradictions and evidence gaps
+  and gives a **preliminary assessment** ("Potentially supported,
+  subject to verification" / "Mixed — partly supported" / "Not
+  established on current evidence") with supporting factors,
+  weaknesses, missing evidence, legal uncertainty and what would
+  change the assessment. The rubric scores (evidence / reasoning /
+  consistency, each /10) measure how the arguments tracked the
+  evidence — they are **not** a probability of winning. There is no
+  confidence percentage, no order and no verdict.
+- **Case Brief** (`courtroom.py:build_case_brief`) — structured
+  Markdown: case overview, facts (reported / alleged / disputed),
+  evidence matrix, legal issues, applicable law (verified citations
+  only), both sides' strongest supported arguments, weaknesses,
+  missing evidence, questions for the client, preliminary
+  assessment. Built only from the statement, matrix, sources and
+  assessment — no invented facts.
 - **LLM** (`llm.py`) — every speech is generated by a real LLM when one
   is available: **Groq** when `GROQ_API_KEY` is set (recommended — very
-  fast, which is what a live debate needs; default model
-  `openai/gpt-oss-120b`, override with `GROQ_MODEL`), else **OpenAI**
-  when `OPENAI_API_KEY` is set (any OpenAI-compatible endpoint works via
-  `OPENAI_BASE_URL` + `OPENAI_MODEL`), otherwise the **free Pollinations
-  API — no key needed**, so the demo works out of the box. Prompts ground
-  each agent on the case facts only, and each speech is tagged with its
-  source (`llm:groq`, `llm:openai`, `llm:pollinations`, or `local`). If
-  the LLM is unreachable, that speech falls back to the local engine — a
-  hearing never fails because of the network. Keys live in env vars
-  only, never in the repo.
+  fast; default model `openai/gpt-oss-120b`, override with `GROQ_MODEL`),
+  else **OpenAI** when `OPENAI_API_KEY` is set (any OpenAI-compatible
+  endpoint works via `OPENAI_BASE_URL` + `OPENAI_MODEL`), otherwise the
+  **free Pollinations API — no key needed**, so the demo works out of
+  the box. Prompts ground each agent on the case facts, evidence matrix
+  and verified sources only, and each speech is tagged with its source
+  (`llm:groq`, `llm:openai`, `llm:pollinations`, or `local`). If the LLM
+  is unreachable, that speech falls back to the local engine — a hearing
+  never fails because of the network. Keys live in env vars only, never
+  in the repo.
 
 ```bash
 # Use Groq (recommended — fastest for the live demo)
@@ -69,9 +115,6 @@ export OPENAI_API_KEY="sk-..."        # fresh key via Secure Vault, never in the
 python app.py --serve
 
 # Or just run it — the free no-key provider is the default.
-# Note: it takes ~10s per speech, so a full hearing runs ~1-2 minutes.
-# With an OpenAI key the same hearing takes seconds. For a snappier
-# free demo, cap the rounds: --max-rounds 3
 python app.py --serve
 
 # Offline, deterministic local engine (also what the tests use)
@@ -83,7 +126,7 @@ python app.py --sample rent-deposit --no-llm
 ```bash
 pip install -r requirements.txt
 
-# Web UI — open http://127.0.0.1:5000, paste a case, click "Start the hearing"
+# Web UI — open http://127.0.0.1:5000, paste a case, click "Analyse the case"
 python app.py --serve
 
 # CLI — sample cases
@@ -104,9 +147,9 @@ curl -X POST localhost:5000/api/hearing -H 'Content-Type: application/json' \
 
 | Sample | Issue | Why it's a good demo |
 |---|---|---|
-| Rental deposit dispute | tenancy | Strong documents for the claimant — watch the Judge side with her |
+| Rental deposit dispute | tenancy | Deposit documented, but the ₹20,000 repair deduction has no bills — watch the matrix flag it Unsupported and the assessment come back Mixed |
 | Freelance contract, unpaid ₹80,000 | contract | Signed contract + acceptance email vs a "delay" excuse |
-| Shoplifting allegation | criminal | CCTV claimed but never shared, no witness — burden of proof bites |
+| Shoplifting allegation | criminal | CCTV claimed but never shared, no witness — burden of proof bites; no verified criminal source is retrieved, so legal claims are labelled unsupported |
 
 ## API
 
@@ -116,39 +159,84 @@ curl -X POST localhost:5000/api/hearing -H 'Content-Type: application/json' \
 {
   "shared_case_statement": "...",
   "llm_provider": "pollinations",
-  "rounds_held": 2,
+  "rounds_held": 4,
   "stopped_by": "judge",
-  "judge_checks": [{"after_round": 2, "sufficient": true,
-                    "reason": "One side leads the rubric by 1.1 points ...",
-                    "decided_by": "rule"}],
+  "judge_checks": [{"after_round": 2, "sufficient": false,
+                    "reason": "Scores are close ..."}],
   "case_summary": {"issue": "tenancy", "plaintiff": "...", "defendant": "...",
                    "amounts": ["₹50,000"], "dates": [...], "documents": [...]},
+  "evidence_matrix": [{"fact": "Repairs/repainting cost ₹20,000 claimed ...",
+                       "evidence": "No bills or receipts supplied",
+                       "supports": "respondent", "status": "Unsupported",
+                       "note": "..."}],
+  "legal_sources": [{"citation": "Indian Contract Act, 1872, s. 73",
+                     "url": "https://indiankanoon.org/doc/339747/", "...": "..."}],
+  "sources_verified": true,
   "transcript": [{"round_no": 1, "round_name": "Opening Statements",
                   "speaker": "Prosecution", "role": "...", "text": "...",
                   "source": "llm:pollinations"}],
-  "verdict": {"verdict": "...", "winner": "prosecution",
-              "scores": {"prosecution": {...}, "defense": {...}},
-              "confidence_pct": 78, "reasons": [...], "order": "..."}
+  "assessment": {"assessment": "Mixed — partly supported; key points remain unverified",
+                 "lean": "neither",
+                 "scores": {"prosecution": {...}, "defense": {...}},
+                 "supporting_factors": [...], "weaknesses": [...],
+                 "missing_evidence": [...], "legal_uncertainty": [...],
+                 "what_would_change": [...],
+                 "judge_statement": "..."},
+  "brief_markdown": "# Case Brief — Preliminary Assessment\n...",
+  "disclaimer": "Litigation-preparation simulation ... Not legal advice ...",
+  "limitations": "Legal sources are a curated starter set ..."
 }
 ```
+
+`GET /api/legal-sources` → the full verified source set.
 
 ## Tests
 
 ```bash
-python test_courtroom.py        # 10 tests, no dependencies, no network
+python test_courtroom.py        # 18 tests, no dependencies, no network
 # or: python -m pytest test_courtroom.py -v
 ```
 
+Tests cover: same statement to all agents, dynamic rounds, evidence
+matrix structure and statuses (rent-deposit repairs Unsupported,
+shoplifting CCTV/witness Unsupported), legal-source retrieval
+returns only verified entries with links, assessment has no
+confidence percentage and no verdict key, the brief contains all
+required sections and no invented amounts, the frontend contains
+no `innerHTML` (all rendering via `textContent`), and a malicious
+case input (`<script>`, `<img onerror>`) is handled as data.
+
 ## Files
 
-- `courtroom.py` — parser + 3 agents + judge (dynamic rounds) + `run_hearing()`
+- `courtroom.py` — parser + Evidence Analyst + 2 counsel agents +
+  Judge critique + case brief + `run_hearing()` (dynamic rounds)
+- `legal_sources.py` — curated verified Indian legal sources + retrieval
 - `app.py` — CLI + Flask web UI / API
 - `samples.py` — 3 sample cases
-- `llm.py` — real LLM client (OpenAI → free Pollinations → local fallback)
-- `templates/index.html` — light-theme courtroom UI
+- `llm.py` — real LLM client (Groq → OpenAI → free Pollinations → local fallback)
+- `templates/index.html` — light-theme workspace UI, XSS-safe rendering
+  (`textContent` only, no `innerHTML`)
 - `test_courtroom.py` — tests
+
+## Limitations
+
+- Legal sources are a **curated starter set** (tenancy + contract
+  focus), not full legal research. Criminal and other issue types
+  may retrieve no source — the system says so rather than inventing
+  one. A lawyer must verify applicability, jurisdiction and current
+  law.
+- The evidence matrix is derived **only from the statement as
+  given**. It cannot see the actual documents — it can only note
+  what the statement says exists, and flag what it says is missing.
+- The rubric scores measure argument quality against the evidence
+  matrix. They are not calibrated against real cases and are not a
+  probability of winning.
+- LLM speeches can still be imperfect; the local engine, the matrix
+  and the "unsupported" labelling are the guardrails, not a guarantee.
 
 ## Disclaimer
 
-Simulation for legal education and hackathon demo only. Not legal advice,
-and not a real court judgment.
+Litigation-preparation simulation for education and hackathon demo
+only. Not legal advice, not a real court judgment, and not a
+prediction of how a real court would rule. A qualified lawyer must
+review and verify everything before acting on it.
