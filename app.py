@@ -13,9 +13,11 @@ Use --no-llm for the offline local engine. The debate runs until the
 Judge says it has heard enough to prepare a preliminary assessment
 (min 2, max 6 rounds — see --max-rounds).
 
-Web API:  POST /api/hearing {"case": "..."} -> evidence matrix +
-          verified legal sources + transcript + Judge's critique +
-          case brief (Markdown)
+Web API:  POST /api/hearing {"case": "...", "evidence": "..."} ->
+          evidence matrix + verified legal sources + transcript +
+          Judge's critique + case brief (Markdown). "evidence" is
+          optional: pasted excerpts, one per line, each becoming a
+          Reported matrix row attributed as a user-supplied note.
           GET  /api/samples                    -> the 3 sample cases
           GET  /api/legal-sources              -> verified source set
           GET  /health
@@ -43,6 +45,11 @@ def print_hearing(result: dict) -> None:
     for r in result["evidence_matrix"]:
         print(f"  [{r['status']}] {r['fact']} — {r['evidence']} "
               f"(supports {r['supports']})")
+    if result.get("evidence_notes"):
+        print("\nUSER-SUPPLIED EVIDENCE NOTES (reported as stated, "
+              "not verified):")
+        for n in result["evidence_notes"]:
+            print(f"  - {n}")
     print("\nVERIFIED LEGAL SOURCES")
     for src in result["legal_sources"]:
         print(f"  - {src['citation']} — {src['url']}")
@@ -106,11 +113,12 @@ def serve(llm=None):
     def hearing():
         data = request.get_json(force=True, silent=True) or {}
         case = (data.get("case") or "").strip()
+        evidence = data.get("evidence") or None
         if len(case) < 20:
             return jsonify({"error": "Please describe the case in at least "
                                      "a sentence or two (20+ characters)."}), 400
         try:
-            return jsonify(run_hearing(case, llm=llm))
+            return jsonify(run_hearing(case, llm=llm, evidence=evidence))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
@@ -125,6 +133,13 @@ def main():
                     "evidence matrix, verified sources, debate, "
                     "Judge's critique, case brief. Not legal advice.")
     p.add_argument("--case", help="Problem statement / case facts")
+    p.add_argument("--evidence",
+                   help="Optional evidence notes: excerpts, one per line "
+                        "(each becomes a Reported matrix row, attributed "
+                        "as user-supplied)")
+    p.add_argument("--evidence-file",
+                   help="File containing optional evidence notes, one "
+                        "excerpt per line")
     p.add_argument("--sample", choices=[s["id"] for s in SAMPLES],
                    help="Run a built-in sample case")
     p.add_argument("--serve", action="store_true", help="Start the web UI")
@@ -148,7 +163,12 @@ def main():
         sys.exit(1)
     if not args.json:
         print(f"LLM provider: {llm.provider if llm else 'local (no LLM)'}")
-    result = run_hearing(case, llm=llm, max_rounds=args.max_rounds)
+    evidence = args.evidence
+    if args.evidence_file:
+        with open(args.evidence_file, encoding="utf-8") as f:
+            evidence = f.read()
+    result = run_hearing(case, llm=llm, max_rounds=args.max_rounds,
+                         evidence=evidence)
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
