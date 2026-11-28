@@ -80,6 +80,10 @@
   <label for="case"><b>Problem statement / case facts</b></label>
   <textarea id="case" placeholder="Example: Priya paid a ₹50,000 deposit to her landlord under a rental agreement signed on 12 March 2025. She vacated on 1 Oct 2025 in good condition, but the landlord refused to refund it, claiming ₹20,000 for repairs with no bills..."></textarea>
 
+  <label for="evidence"><b>Evidence / documents (optional)</b> — paste excerpts, one per line</label>
+  <textarea id="evidence" style="min-height: 80px" placeholder="Example: Clause 4, Rental Agreement: deposit refundable on vacating in good condition"></textarea>
+  <p class="meta">Each line becomes a row in the evidence matrix, labelled as a user-supplied note — reported as you stated it, not verified against the original document. Leave it empty to analyse the case statement alone.</p>
+
   <div class="row samples">Try a sample:
     {% for s in samples %}<button type="button" data-case="{{ s.case | e }}">{{ s.title }}</button>{% endfor %}
   </div>
@@ -130,7 +134,7 @@ $('run').onclick = async () => {
   $('run').disabled = true; $('status').textContent = 'Analysing evidence, retrieving sources, hearing both sides…';
   $('out').replaceChildren();
   try {
-    const r = await fetch('/api/hearing', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ case: text }) });
+    const r = await fetch('/api/hearing', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ case: text, evidence: $('evidence').value }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Analysis failed');
     lastResult = data; render(data); $('status').textContent = '';
