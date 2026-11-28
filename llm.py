@@ -1,5 +1,5 @@
 """
-Real LLM layer for the Mini Courtroom.
+Real LLM layer for the Mini Courtroom litigation-prep simulator.
 
 Provider priority (first one that works wins):
   1. Groq — set GROQ_API_KEY (and optionally GROQ_MODEL, default
