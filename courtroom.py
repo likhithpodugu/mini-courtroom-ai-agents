@@ -2,7 +2,10 @@
 Mini Courtroom — litigation-prep simulator, not a court.
 
 Flow:
-    1. The user passes ONE problem statement.
+    1. The user passes ONE problem statement, plus optionally
+       evidence notes — pasted excerpts, one per line — which become
+       Reported matrix rows attributed as user-supplied (never
+       verified documents).
     2. An Evidence Analyst parses it into an evidence matrix BEFORE
        anyone argues: each fact/claim is tied to the evidence mentioned
        for it and labelled Reported / Unverified / Unsupported. A
@@ -97,6 +100,10 @@ class ParsedCase:
     # Evidence the statement itself says was NOT produced (e.g. CCTV
     # "not shared", "no witness") — it cannot count for the claimant.
     evidence_withheld: bool = False
+    # Optional user-supplied evidence notes (see parse_evidence_notes):
+    # pasted excerpts, one per line. Reported as stated by the user —
+    # never treated as verified documents.
+    evidence_notes: list = field(default_factory=list)
 
     @property
     def amount_text(self) -> str:
@@ -184,6 +191,27 @@ def parse_case(statement: str) -> ParsedCase:
                             "demand", "loss", "damag", "took", "gave", "owe",
                             "breach", "denied", "terminat"])]
     return pc
+
+
+def parse_evidence_notes(text: str | None) -> list[str]:
+    """Optional user-supplied evidence notes: one excerpt per line.
+
+    Each line becomes an evidence-matrix row with status Reported and
+    evidence "User-supplied evidence note". The notes are labelled as
+    supplied by the user everywhere they appear — they are reported
+    as stated, never treated as verified documents. Empty input is a
+    no-op. Capped at 20 lines / 400 chars per line."""
+    if not text:
+        return []
+    notes = []
+    for line in str(text).splitlines():
+        line = " ".join(line.split())
+        if not line:
+            continue
+        notes.append(line[:400])
+        if len(notes) >= 20:
+            break
+    return notes
 
 
 # ---------------------------------------------------------------- evidence analyst
@@ -333,6 +361,22 @@ def build_evidence_matrix(case: ParsedCase) -> list[dict]:
         for s in case.sentences[:4]:
             add(s[:140], "No supporting material stated",
                 "both", "Unverified")
+
+    # User-supplied evidence notes: one row per pasted excerpt, status
+    # Reported, attributed as a user-supplied note — never as a verified
+    # document. Supports is inferred only from the party names in the
+    # note itself; otherwise the row is neutral ("both").
+    for note in case.evidence_notes:
+        low_note = note.lower()
+        p_first = _first_name(case.plaintiff).lower()
+        d_first = _first_name(case.defendant).lower()
+        p_hit = bool(p_first) and p_first in low_note
+        d_hit = bool(d_first) and d_first in low_note
+        supports = ("claimant" if p_hit and not d_hit else
+                    "respondent" if d_hit and not p_hit else "both")
+        add(note, "User-supplied evidence note", supports, "Reported",
+            "Supplied by the user in the evidence field — reported as "
+            "stated, not verified against the original document.")
     return rows
 
 
@@ -731,6 +775,16 @@ def build_case_brief(case: ParsedCase, matrix: list[dict],
         lines.append(f"| {r['fact']} | {r['evidence']} | {r['supports']} "
                      f"| {r['status']} |")
     lines.append("")
+    if case.evidence_notes:
+        lines.append("### User-supplied evidence notes")
+        lines.append("")
+        lines.append("Pasted by the user in the evidence field — reported "
+                     "as stated, **not verified** against the original "
+                     "documents:")
+        lines.append("")
+        for note in case.evidence_notes:
+            lines.append(f"- {note}")
+        lines.append("")
     lines.append("## 4. Legal issues")
     lines.append("")
     for issue in LEGAL_ISSUES.get(case.issue, DEFAULT_ISSUES):
@@ -858,8 +912,8 @@ def _first_name(party: str) -> str:
 def judge_check(case: ParsedCase, speeches: list[Speech],
                 llm=None, min_rounds: int = MIN_ROUNDS,
                 max_rounds: int = MAX_ROUNDS) -> dict:
-    """After each debate round the Judge decides: enough to assess,
-    or one more round?
+    """After each debate round the Judge checks whether it has heard
+    enough to assess, or one more round is needed.
 
     Deterministic rule (always applies): not enough before MIN_ROUNDS;
     enough when one side leads the rubric by >= 1.0; enough at 4+ rounds
@@ -928,9 +982,14 @@ def judge_check(case: ParsedCase, speeches: list[Speech],
 
 def run_hearing(statement: str, llm=None,
                 max_rounds: int = MAX_ROUNDS,
-                min_rounds: int = MIN_ROUNDS) -> dict:
+                min_rounds: int = MIN_ROUNDS,
+                evidence: str | None = None) -> dict:
     """Run one full hearing. One statement in, evidence matrix +
     debate transcript + Judge's critique + case brief out.
+
+    `evidence` is an optional string of user-supplied evidence notes
+    (one excerpt per line); each becomes a Reported matrix row
+    attributed as a user-supplied note. Empty evidence changes nothing.
 
     The debate is NOT fixed-length: after every rebuttal round the Judge
     checks whether it has heard enough (see judge_check). It stops early
@@ -938,15 +997,17 @@ def run_hearing(statement: str, llm=None,
     Pass an LLM client (llm.get_client()) for LLM-generated speeches,
     or None for the offline local engine.
     """
-    return _run_hearing(statement, llm, min_rounds, max_rounds)
+    return _run_hearing(statement, llm, min_rounds, max_rounds, evidence)
 
 
 def _run_hearing(statement: str, llm=None,
                  min_rounds: int = MIN_ROUNDS,
-                 max_rounds: int = MAX_ROUNDS) -> dict:
+                 max_rounds: int = MAX_ROUNDS,
+                 evidence: str | None = None) -> dict:
     if not statement or not statement.strip():
         raise ValueError("Please provide a problem statement / case facts.")
     case = parse_case(statement)
+    case.evidence_notes = parse_evidence_notes(evidence)
     # Evidence Analyst first, then Legal Research — before any lawyer
     # speaks. All three agents receive the SAME case, matrix and sources.
     matrix = build_evidence_matrix(case)
@@ -972,6 +1033,11 @@ def _run_hearing(statement: str, llm=None,
                  "120-180 words.")
     evidence_block = (f"\n\nEvidence matrix:\n{matrix_text}\n\n"
                       f"{sources_text}")
+    if case.evidence_notes:
+        evidence_block += (
+            "\n\nUser-supplied evidence notes (reported as stated by the "
+            "user, not verified against any document):\n" +
+            "\n".join(f"- {n}" for n in case.evidence_notes))
     p_first, d_first = _first_name(case.plaintiff), _first_name(case.defendant)
     no_p = [f"represent {p_first}", f"represent ms. {p_first}",
             f"represent mr. {p_first}"] if p_first else []
@@ -1101,6 +1167,7 @@ def _run_hearing(statement: str, llm=None,
         "evidence_matrix": matrix,
         "legal_sources": sources,
         "sources_verified": True,
+        "evidence_notes": list(case.evidence_notes),
         "transcript": transcript,
         "assessment": assessment,
         "brief_markdown": brief,
