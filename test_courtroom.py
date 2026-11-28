@@ -7,7 +7,7 @@ import os
 
 from courtroom import (build_case_brief, build_evidence_matrix,
                        judge_assessment, judge_check, parse_case,
-                       run_hearing)
+                       parse_evidence_notes, run_hearing)
 from legal_sources import SOURCES, retrieve
 from samples import SAMPLES
 
@@ -255,6 +255,56 @@ def test_malicious_case_input_is_data_not_markup():
     assert r["assessment"]["assessment"]
     assert r["evidence_matrix"]
     assert "<script>" in r["shared_case_statement"]
+
+
+# ---- new behaviour: optional evidence notes -----------------------
+
+NOTE = ("Clause 4, Rental Agreement: deposit refundable on vacating "
+        "in good condition")
+
+
+def test_evidence_notes_appear_in_matrix_and_brief():
+    r = run_hearing(SAMPLES[0]["case"], evidence=NOTE)
+    assert r["evidence_notes"] == [NOTE]
+    rows = [x for x in r["evidence_matrix"] if x["fact"] == NOTE]
+    assert rows, r["evidence_matrix"]
+    row = rows[0]
+    assert row["status"] == "Reported"
+    assert row["evidence"] == "User-supplied evidence note"
+    assert "not verified" in row["note"]
+    assert NOTE in r["brief_markdown"]
+    assert "User-supplied evidence notes" in r["brief_markdown"]
+    assert "not verified" in r["brief_markdown"]
+    # The note is also fed to the debate: it appears in the evidence
+    # summary the lawyers speak from (via the matrix).
+    assert any(NOTE in x["fact"] for x in r["evidence_matrix"])
+
+
+def test_empty_evidence_is_a_no_op():
+    base = run_hearing(SAMPLES[0]["case"])
+    assert run_hearing(SAMPLES[0]["case"],
+                       evidence="")["evidence_matrix"] == \
+        base["evidence_matrix"]
+    assert run_hearing(SAMPLES[0]["case"],
+                       evidence=None)["evidence_matrix"] == \
+        base["evidence_matrix"]
+    assert run_hearing(SAMPLES[0]["case"],
+                       evidence="   \n\n  ")["evidence_notes"] == []
+    assert parse_evidence_notes(None) == []
+    assert parse_evidence_notes("  \n\n") == []
+
+
+def test_malicious_evidence_note_is_data_not_markup():
+    evil = "<script>alert('xss')</script> Clause 4, Rental Agreement"
+    r = run_hearing(SAMPLES[0]["case"], evidence=evil)
+    # Backend returns the note as data; it must not crash and the
+    # assessment/brief must be produced. Rendering safety is enforced
+    # by the frontend test above (textContent only, no innerHTML).
+    assert r["assessment"]["assessment"]
+    assert r["evidence_notes"] == [evil]
+    rows = [x for x in r["evidence_matrix"] if x["fact"] == evil]
+    assert rows and rows[0]["status"] == "Reported"
+    assert evil in r["brief_markdown"]
 
 
 if __name__ == "__main__":
