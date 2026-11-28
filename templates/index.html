@@ -3,19 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mini Courtroom — AI Agents Debate, Judge Decides</title>
+<title>Mini Courtroom — Litigation-Prep Simulator</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f6f7f9; color: #1a1d21; margin: 0; padding: 0 16px 48px; }
-  .wrap { max-width: 860px; margin: 0 auto; }
+  .wrap { max-width: 880px; margin: 0 auto; }
   header { padding: 28px 0 8px; }
   h1 { font-size: 28px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 22px 0 8px; }
   p.sub { color: #5b6470; margin: 0 0 18px; line-height: 1.5; }
-  .agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  .disclaimer { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
+  .agents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 18px; }
   .agent { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 14px; }
   .agent b { display: block; font-size: 15px; }
   .agent span { color: #5b6470; font-size: 13px; line-height: 1.45; display: block; margin-top: 4px; }
-  .dot-p { color: #c2410c; } .dot-d { color: #1d4ed8; } .dot-j { color: #111827; }
+  .dot-p { color: #c2410c; } .dot-d { color: #1d4ed8; } .dot-j { color: #111827; } .dot-e { color: #047857; }
   textarea { width: 100%; min-height: 130px; padding: 12px; font: inherit; font-size: 15px; line-height: 1.5; border: 1px solid #cbd2d9; border-radius: 10px; background: #fff; resize: vertical; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
   button { font: inherit; font-size: 15px; padding: 10px 18px; border-radius: 9px; border: 1px solid #d0d5db; background: #fff; cursor: pointer; }
@@ -25,17 +27,27 @@
   .samples button { font-size: 13px; padding: 6px 10px; }
   #status { color: #5b6470; margin: 8px 0; }
   .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .card p { margin: 6px 0; line-height: 1.55; }
+  .card ul { margin: 8px 0; padding-left: 20px; line-height: 1.55; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.45; }
+  th, td { text-align: left; border-bottom: 1px solid #e3e6ea; padding: 8px 6px; vertical-align: top; }
+  th { color: #5b6470; font-size: 13px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 2px 8px; }
+  .badge.reported { background: #dcfce7; color: #166534; }
+  .badge.unverified { background: #fef9c3; color: #854d0e; }
+  .badge.unsupported { background: #fee2e2; color: #991b1b; }
   .speech { border-left: 4px solid #ccc; padding: 2px 0 2px 14px; margin: 14px 0; }
   .speech.pros { border-color: #ea580c; } .speech.def { border-color: #2563eb; } .speech.judge { border-color: #111827; }
   .speech h3 { margin: 0 0 6px; font-size: 14px; }
   .speech h3 small { color: #5b6470; font-weight: normal; }
   .speech p { margin: 0; line-height: 1.6; white-space: pre-wrap; }
-  .verdict { background: #111827; color: #fff; border-radius: 12px; padding: 18px; margin: 16px 0; }
-  .verdict h2 { margin: 0 0 8px; font-size: 20px; }
-  .verdict p { margin: 6px 0; line-height: 1.55; color: #e5e7eb; }
-  .verdict ul { margin: 8px 0; padding-left: 20px; color: #e5e7eb; line-height: 1.55; }
-  .scores { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0; }
-  .scores div { background: rgba(255,255,255,.08); border-radius: 8px; padding: 8px 12px; }
+  details { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  summary { cursor: pointer; font-weight: 700; }
+  .assessment { background: #111827; color: #fff; border-radius: 12px; padding: 18px; margin: 16px 0; }
+  .assessment h2 { margin: 0 0 8px; font-size: 20px; color: #fff; }
+  .assessment p { margin: 6px 0; line-height: 1.55; color: #e5e7eb; }
+  .assessment ul { margin: 8px 0; padding-left: 20px; color: #e5e7eb; line-height: 1.55; }
+  .assessment b { color: #fff; }
   .meta { font-size: 13px; color: #5b6470; }
   .hidden { display: none; }
   footer { color: #8a929c; font-size: 13px; margin-top: 24px; line-height: 1.5; }
@@ -46,13 +58,22 @@
 <div class="wrap">
   <header>
     <h1>⚖️ Mini Courtroom</h1>
-    <p class="sub">Paste one problem statement. All three AI agents get the <b>same</b> statement —
-    the Prosecution and Defense lawyers debate it until the Judge says it has heard enough, then the Judge gives the final verdict.
-    <span class="meta">LLM: {{ llm_provider }} — set <code>OPENAI_API_KEY</code> to use OpenAI instead.</span></p>
+    <p class="sub"><b>Litigation-prep simulator</b> — paste one case, get an evidence
+    matrix, verified legal sources, both sides argued, a Judge's critique,
+    and a cited case brief. It stress-tests arguments and finds weaknesses;
+    it does not decide cases.
+    <span class="meta">LLM: {{ llm_provider }}.</span></p>
+    <div class="disclaimer"><b>Not legal advice.</b> This is a simulation for legal
+    education and litigation preparation. It is not a real court judgment and
+    does not predict how a real court would rule. A qualified lawyer must
+    review and verify everything.</div>
     <div class="agents">
-      <div class="agent"><b><span class="dot-p">●</span> Offense Lawyer</b><span>Prosecution — argues the claim, cites the documents and the amount.</span></div>
-      <div class="agent"><b><span class="dot-d">●</span> Defense Lawyer</b><span>Argues the other side — burden of proof, gaps in evidence, fair chance.</span></div>
-      <div class="agent"><b><span class="dot-j">●</span> Judge</b><span>Scores both sides on evidence, reasoning &amp; consistency, then decides.</span></div>
+      <div class="agent"><b><span class="dot-e">●</span> Evidence Analyst</b><span>Parses the statement into an evidence matrix first — Reported, Unverified or Unsupported — before anyone argues.</span></div>
+      <div class="agent"><b><span class="dot-e">●</span> Legal Research</b><span>Retrieves only verified Indian statutes and judgments. No source, no citation — the claim is labelled unsupported.</span></div>
+      <div class="agent"><b><span class="dot-p">●</span> Claimant's Counsel</b><span>Argues the claim from the evidence matrix and verified sources only.</span></div>
+      <div class="agent"><b><span class="dot-d">●</span> Respondent's Counsel</b><span>Argues the other side — burden of proof, gaps, unsupported claims.</span></div>
+      <div class="agent"><b><span class="dot-j">●</span> Judge — critique, not a verdict</b><span>Identifies unsupported claims, contradictions and evidence gaps, and gives a preliminary assessment.</span></div>
+      <div class="agent"><b><span class="dot-j">●</span> Case Brief</b><span>A structured, downloadable brief a lawyer can review: facts, evidence, law, weaknesses, missing evidence.</span></div>
     </div>
   </header>
 
@@ -63,55 +84,165 @@
     {% for s in samples %}<button type="button" data-case="{{ s.case | e }}">{{ s.title }}</button>{% endfor %}
   </div>
   <div class="row">
-    <button class="primary" id="run" type="button">▶ Start the hearing</button>
-    <button id="download" type="button" class="hidden">⬇ Download transcript</button>
+    <button class="primary" id="run" type="button">▶ Analyse the case</button>
+    <button id="download-brief" type="button" class="hidden">⬇ Download case brief (.md)</button>
+    <button id="download" type="button" class="hidden">⬇ Download transcript (.json)</button>
   </div>
   <div id="status"></div>
   <div id="out"></div>
 
-  <footer>Simulation for legal education and hackathon demo only — not legal advice, and not a real court judgment.
-  Works offline with no API keys. Optional: set <code>OPENAI_API_KEY</code> to enrich speeches with a real LLM.</footer>
+  <footer>Simulation for legal education and hackathon demo only — not legal advice,
+  not a real court judgment, and not a prediction of any real outcome. Legal sources
+  are a curated starter set of verified Indian statutes and judgments, not full legal
+  research. Works offline with no API keys; set <code>GROQ_API_KEY</code> or
+  <code>OPENAI_API_KEY</code> to enrich speeches with a real LLM.</footer>
 </div>
 <script>
+// XSS-safe rendering: every piece of case text, agent speech and
+// assessment text is inserted with textContent / createElement —
+// never inserted as markup. Untrusted input can never become markup.
 const $ = id => document.getElementById(id);
 let lastResult = null;
+
+function el(tag, text, className) {
+  const n = document.createElement(tag);
+  if (text !== undefined && text !== null) n.textContent = text;
+  if (className) n.className = className;
+  return n;
+}
+function badge(status) {
+  const b = el('span', status, 'badge ' + status.toLowerCase());
+  return b;
+}
+function download(filename, text, type) {
+  const blob = new Blob([text], { type: type || 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 document.querySelectorAll('[data-case]').forEach(b => b.onclick = () => { $('case').value = b.dataset.case; $('case').focus(); });
 $('run').onclick = async () => {
   const text = $('case').value.trim();
   if (text.length < 20) { $('status').textContent = 'Please describe the case in a sentence or two first.'; return; }
-  $('run').disabled = true; $('status').textContent = 'Court is in session — opening statements, rebuttals, closing arguments…';
-  $('out').innerHTML = '';
+  $('run').disabled = true; $('status').textContent = 'Analysing evidence, retrieving sources, hearing both sides…';
+  $('out').replaceChildren();
   try {
     const r = await fetch('/api/hearing', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ case: text }) });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Hearing failed');
+    if (!r.ok) throw new Error(data.error || 'Analysis failed');
     lastResult = data; render(data); $('status').textContent = '';
     $('download').classList.remove('hidden');
+    $('download-brief').classList.remove('hidden');
   } catch (e) { $('status').textContent = 'Error: ' + e.message; }
   $('run').disabled = false;
 };
 $('download').onclick = () => {
   if (!lastResult) return;
-  const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mini-courtroom-transcript.json'; a.click();
+  download('mini-courtroom-transcript.json', JSON.stringify(lastResult, null, 2), 'application/json');
 };
+$('download-brief').onclick = () => {
+  if (!lastResult || !lastResult.brief_markdown) return;
+  download('case-brief.md', lastResult.brief_markdown, 'text/markdown');
+};
+
 function render(d) {
-  const cls = s => s === 'Prosecution' ? 'pros' : s === 'Defense' ? 'def' : 'judge';
-  const v = d.verdict, s = d.case_summary;
-  let h = `<div class="card"><div class="meta">Shared case file — all 3 agents received this exact statement</div>
-    <p><b>Issue:</b> ${s.issue} &nbsp;|&nbsp; <b>${s.plaintiff}</b> vs <b>${s.defendant}</b>
-    ${s.amounts.length ? ` &nbsp;|&nbsp; <b>Amount:</b> ${s.amounts.join(', ')}` : ''}
-    ${s.documents.length ? ` &nbsp;|&nbsp; <b>Documents:</b> ${s.documents.join(', ')}` : ''}</p></div>`;
+  const out = $('out');
+  const s = d.case_summary, a = d.assessment;
+
+  // 1. Case summary
+  const card = el('div', null, 'card');
+  card.appendChild(el('div', 'Shared case file — Evidence Analyst, both counsel and the Judge all received this exact statement', 'meta'));
+  const p = el('p');
+  p.appendChild(el('b', 'Issue: ')); p.appendChild(document.createTextNode(s.issue + '  |  '));
+  p.appendChild(el('b', s.plaintiff + ' vs ' + s.defendant));
+  if (s.amounts && s.amounts.length) { p.appendChild(document.createTextNode('  |  Amount: ')); p.appendChild(el('b', s.amounts.join(', '))); }
+  if (s.documents && s.documents.length) { p.appendChild(document.createTextNode('  |  Documents: ')); p.appendChild(el('b', s.documents.join(', '))); }
+  card.appendChild(p);
+  const meta = el('div', 'LLM: ' + d.llm_provider + ' · Debate ran ' + d.rounds_held + ' round(s) (min 2, max 6) · Sources verified: ' + (d.sources_verified ? 'yes — curated set, see below' : 'no'), 'meta');
+  card.appendChild(meta);
+  out.appendChild(card);
+
+  // 2. Evidence matrix
+  out.appendChild(el('h2', 'Evidence matrix — what the statement actually supports'));
+  const tblCard = el('div', null, 'card');
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  ['Fact / claim', 'Evidence', 'Supports', 'Status'].forEach(h => head.appendChild(el('th', h)));
+  table.appendChild(head);
+  d.evidence_matrix.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.appendChild(el('td', row.fact));
+    tr.appendChild(el('td', row.evidence));
+    tr.appendChild(el('td', row.supports));
+    const td = document.createElement('td'); td.appendChild(badge(row.status)); tr.appendChild(td);
+    table.appendChild(tr);
+  });
+  tblCard.appendChild(table);
+  tblCard.appendChild(el('p', 'A document merely being mentioned does not mean it supports a claim. Evidence the statement says was never produced cannot count for the party asserting it.', 'meta'));
+  out.appendChild(tblCard);
+
+  // 3. Legal authorities
+  out.appendChild(el('h2', 'Legal authorities — verified sources only'));
+  const srcCard = el('div', null, 'card');
+  if (d.legal_sources && d.legal_sources.length) {
+    const ul = document.createElement('ul');
+    d.legal_sources.forEach(src => {
+      const li = document.createElement('li');
+      li.appendChild(el('b', src.citation + ' — '));
+      li.appendChild(document.createTextNode(src.excerpt + ' '));
+      const link = document.createElement('a');
+      link.href = src.url; link.textContent = 'Source'; link.target = '_blank'; link.rel = 'noopener';
+      li.appendChild(link);
+      ul.appendChild(li);
+    });
+    srcCard.appendChild(ul);
+  } else {
+    srcCard.appendChild(el('p', 'No verified legal source was retrieved for this issue type. Every legal proposition is therefore labelled unsupported — no verified source retrieved.'));
+  }
+  srcCard.appendChild(el('p', 'Limitations: a curated starter set of verified Indian statutes and judgments — not full legal research. A lawyer must verify applicability, jurisdiction and current law.', 'meta'));
+  out.appendChild(srcCard);
+
+  // 4. Judge's critique / preliminary assessment
+  const assess = el('div', null, 'assessment');
+  assess.appendChild(el('h2', 'Judge\u2019s critique — preliminary assessment (not a verdict)'));
+  const ap = el('p'); ap.appendChild(el('b', a.assessment)); assess.appendChild(ap);
+  const rubric = el('p', 'Argument rubric — Claimant ' + a.prosecution_avg + '/10 · Respondent ' + a.defense_avg + '/10. This measures how the arguments tracked the evidence; it is not a probability of winning and no confidence percentage is given.');
+  assess.appendChild(rubric);
+  assess.appendChild(el('p', a.judge_statement));
+  const addList = (title, items) => {
+    const b = el('b', title); const pp = el('p'); pp.appendChild(b); assess.appendChild(pp);
+    const ul = document.createElement('ul');
+    items.forEach(it => ul.appendChild(el('li', it)));
+    assess.appendChild(ul);
+  };
+  addList('Supporting factors:', a.supporting_factors);
+  addList('Weaknesses:', a.weaknesses);
+  addList('Missing evidence:', a.missing_evidence);
+  addList('What would change this assessment:', a.what_would_change);
+  addList('Legal uncertainty:', a.legal_uncertainty);
+  out.appendChild(assess);
+
+  // 5. Debate transcript (collapsible)
+  const det = document.createElement('details');
+  det.appendChild(el('summary', 'Debate transcript — both sides argued (' + d.rounds_held + ' rounds)'));
   const lastCheck = d.judge_checks[d.judge_checks.length - 1];
-  h += `<div class="card"><b>⚖ The Judge stopped the debate after round ${d.rounds_held}</b> — ${lastCheck ? lastCheck.reason : ''}<br><span class="meta">LLM: ${d.llm_provider} · Debate ran ${d.rounds_held} round(s) (min 2, max 6) · ${d.judge_checks.length} judge check(s)</span></div>`;
-  h += '<h2>Debate transcript</h2>';
-  d.transcript.forEach(t => { h += `<div class="speech ${cls(t.speaker)}"><h3>${t.speaker} — ${t.role} <small>· Round ${t.round_no}: ${t.round_name} · ${t.source === 'local' ? 'local engine' : 'via LLM (' + t.source + ')'}</small></h3><p>${t.text}</p></div>`; });
-  h += `<div class="verdict"><h2>⚖ Verdict: ${v.verdict}</h2>
-    <div class="scores"><div>Prosecution <b>${v.prosecution_avg}/10</b></div><div>Defense <b>${v.defense_avg}/10</b></div><div>Confidence <b>${v.confidence_pct}%</b></div></div>
-    <p><b>Why:</b></p><ul>${v.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-    <p><b>Order:</b> ${v.order}</p></div>`;
-  $('out').innerHTML = h;
-  $('out').scrollIntoView({ behavior: 'smooth' });
+  if (lastCheck) det.appendChild(el('p', 'The Judge stopped the debate after round ' + d.rounds_held + ' — ' + lastCheck.reason, 'meta'));
+  d.transcript.forEach(t => {
+    const cls = t.speaker === 'Prosecution' ? 'pros' : t.speaker === 'Defense' ? 'def' : 'judge';
+    const div = el('div', null, 'speech ' + cls);
+    const h = el('h3', t.speaker + ' — ' + t.role + ' ');
+    h.appendChild(el('small', '· Round ' + t.round_no + ': ' + t.round_name + ' · ' + (t.source === 'local' ? 'local engine' : 'via LLM (' + t.source + ')')));
+    div.appendChild(h);
+    div.appendChild(el('p', t.text));
+    det.appendChild(div);
+  });
+  out.appendChild(det);
+
+  out.appendChild(el('p', d.disclaimer, 'meta'));
+  out.scrollIntoView({ behavior: 'smooth' });
 }
 </script>
 </body>
